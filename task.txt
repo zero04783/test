@@ -1,0 +1,101 @@
+import os
+import numpy as np
+from PIL import Image
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder
+from keras.models import Sequential
+from keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization
+from keras.models import load_model
+
+# Initialize the encoder for labels
+encoder = OneHotEncoder()
+encoder.fit([[0], [1]])  # 0 - Tumor, 1 - Normal
+
+data = []
+result = []
+
+# Function to process images
+def process_images(directory, label):
+    paths = []
+    for r, d, f in os.walk(directory):
+        for file in f:
+            if '.jpg' in file:
+                paths.append(os.path.join(r, file))
+    for path in paths:
+        img = Image.open(path)
+        img = img.resize((128, 128))
+        img = np.array(img)
+        if img.shape == (128, 128, 3):
+            data.append(img)
+            result.append(encoder.transform([[label]]).toarray()[0])
+
+# Process images with tumor
+process_images('../input/brain-mri-images-for-brain-tumor-detection/yes', 0)
+
+# Process images without tumor
+process_images('../input/brain-mri-images-for-brain-tumor-detection/no', 1)
+
+# Convert lists to numpy arrays
+data = np.array(data)
+result = np.array(result)
+
+# Split data into training and testing sets
+x_train, x_test, y_train, y_test = train_test_split(data, result, test_size=0.2, shuffle=True, random_state=0)
+
+# Build the model
+model = Sequential()
+model.add(Conv2D(32, kernel_size=(2, 2), input_shape=(128, 128, 3), padding='Same', activation='relu'))
+model.add(Conv2D(32, kernel_size=(2, 2), padding='Same', activation='relu'))
+model.add(BatchNormalization())
+model.add(MaxPooling2D(pool_size=(2, 2)))
+model.add(Dropout(0.25))
+
+model.add(Conv2D(64, kernel_size=(2, 2), padding='Same', activation='relu'))
+model.add(Conv2D(64, kernel_size=(2, 2), padding='Same', activation='relu'))
+model.add(BatchNormalization())
+model.add(MaxPooling2D(pool_size=(2, 2), strides=(2, 2)))
+model.add(Dropout(0.25))
+
+model.add(Flatten())
+model.add(Dense(512, activation='relu'))
+model.add(Dropout(0.5))
+model.add(Dense(2, activation='softmax'))
+
+model.compile(loss='categorical_crossentropy', optimizer='Adamax', metrics=['accuracy'])
+print(model.summary())
+
+# Train the model
+history = model.fit(x_train, y_train, epochs=30, batch_size=40, verbose=1, validation_data=(x_test, y_test))
+
+# Save the model to a file
+model.save('brain_tumor_detection_model.h5')
+
+# Load the model from the file
+saved_model = load_model('brain_tumor_detection_model.h5')
+
+# Function to interpret the results
+def names(number):
+    if number == 0:
+        return 'Its a Tumor'
+    else:
+        return 'No, Its not a tumor'
+
+from matplotlib.pyplot import imshow
+
+# Test with a new image from the 'no' category
+img = Image.open(r"../input/brain-mri-images-for-brain-tumor-detection/no/N17.jpg")
+x = np.array(img.resize((128, 128)))
+x = x.reshape(1, 128, 128, 3)
+res = saved_model.predict_on_batch(x)
+classification = np.where(res == np.amax(res))[1][0]
+imshow(img)
+print(str(res[0][classification]*100) + '% Confidence This Is ' + names(classification))
+
+# Test with a new image from the 'yes' category
+img = Image.open(r"../input/brain-mri-images-for-brain-tumor-detection/yes/Y3.jpg")
+x = np.array(img.resize((128, 128)))
+x = x.reshape(1, 128, 128, 3)
+res = saved_model.predict_on_batch(x)
+classification = np.where(res == np.amax(res))[1][0]
+imshow(img)
+print(str(res[0][classification]*100) + '% Confidence This Is ' + names(classification))
